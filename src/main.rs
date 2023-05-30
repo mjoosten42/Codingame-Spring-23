@@ -1,7 +1,7 @@
-use std::{collections::{HashMap, VecDeque}, fmt};
+use std::{collections::{HashMap, VecDeque, HashSet}, fmt, hash::Hash};
 use std::convert::TryInto;
 
-// https://www.redblobgames.com/grids/usizeagons/
+// https://www.redblobgames.com/grids/hexagons/
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum CellType {
@@ -55,9 +55,27 @@ impl PartialEq for Cell {
 
 impl Eq for Cell {}
 
+impl PartialOrd for Cell {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.index.cmp(&other.index))
+	}
+}
+
+impl Ord for Cell {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		self.index.cmp(&other.index)
+	}
+}
+
+impl Hash for Cell {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		self.index.hash(state)
+	}
+}
+
 impl fmt::Display for Cell {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{}", self.index)
+		write!(f, "{:>2}", self.index)
 	}
 }
 
@@ -97,73 +115,92 @@ fn main() {
 			ants += cell.ally_ants;
 		}
 
-		let mut path: Vec<usize> = vec![base.index];
-		let mut used: Vec<usize> = vec![base.index];
+		let mut paths: Vec<HashSet<usize>> = vec![HashSet::from([base.index])];
+		let (mut s, mut j) = (0.0, 0);
 	
-		while let Some(p) = bfs(&cells, *used.last().unwrap(), |cell| {
-			cell.resources > 0 && !used.contains(&cell.index)
-		}) {
-			if let Some(last) = path.last() {
-				used.push(*last);
+		for i in 0.. {
+			if let Some(path) = bfs(&cells, &paths[i], |cell| {
+				cell.resources > 0 && !paths[i].contains(&cell.index)
+			}) {
+				let last = paths.last().unwrap().clone();
+				let extended: HashSet<usize> = last.into_iter().chain(path.into_iter()).collect();
+				let score = calc_score(&cells, &extended, ants, crystals);
+				
+				// {
+				// 	let mut tmp: Vec<usize> = extended.clone().into_iter().collect();
+				// 	tmp.sort_by(|lhs, rhs| 
+				// 		cells.get(lhs).unwrap().ally_distance.cmp(&cells.get(rhs).unwrap().ally_distance)
+				// 	);
+				
+				// 	eprint!("{score:.2}: ");
+				// 	for hex in tmp {
+				// 		eprint!("{hex:>2} ");
+				// 	}
+				// 	eprintln!("");
+				// }
+			
+				if score > s {
+					s = score;
+					j = i + 1;
+				}
+
+				paths.push(extended);
+
+			} else {
+				break ;
 			}
-
-			path.extend(&p[1..]);
-		};
-
-		path.dedup();
-
-		let mut scores: Vec<usize> = Vec::new();
-
-		eprintln!("{path:?}");
-		for i in 1..path.len() {
-			let partial: Vec<&Cell> = path[..i].iter()
-				.map(|hex| cells.get(hex).unwrap())
-				.collect();
-
-			let richness: usize = partial.iter()
-				.map(|cell| cell.resources.clamp(0, 1))
-				.sum();
-
-			eprintln!("{richness}: {partial:?}");
-
-			scores.push(richness / i);
 		}
 
-		let best = *scores.iter().max().unwrap();
+		let best = &paths[j];
 
-		for hex in &path[0..best] {
-			actions.push_str(&format!("BEACON {hex} 1"));
+		actions.push_str(&format!("MESSAGE {};", best.len()));
+	
+		for hex in best {
+			actions.push_str(&format!("BEACON {hex} 1;"));
 		}
 	
 		println!("{actions}");
 	}
 }
 
-fn calc_paths(cells: &HashMap<usize, Cell>, base: &Cell, end: &Cell) -> Vec<Vec<usize>> {
-	let mut paths: VecDeque<Vec<usize>> = vec![vec![base.index]].into();
-	let mut answers: Vec<Vec<usize>> = Vec::new();
+fn calc_score(cells: &HashMap<usize, Cell>, path: &HashSet<usize>, ants: usize, crystals: usize) -> f32 {
+	let richness: usize = path.iter()
+		.map(|hex| cells.get(hex).unwrap())
+		.map(|cell| {
+			let modifier = if cell.cell_type == CellType::Crystal { 1 } else { crystals / ants / 5 };
 
-	while !paths.is_empty() {
-		let path = paths.pop_front().unwrap();
+			cell.resources.clamp(0, 1) * modifier
+		})
+		.sum();
+
+	let score = ants as f32 * richness as f32 / path.len() as f32;
+
+	score
+}
+
+fn bfs(cells: &HashMap<usize, Cell>, path: &HashSet<usize>, f: impl Fn(&Cell) -> bool) -> Option<Vec<usize>> {
+	let mut edges: VecDeque<Vec<usize>> = path.iter().map(|hex| vec![*hex]).collect();
+	let mut visited: Vec<usize> = path.clone().into_iter().collect();
+
+	while !edges.is_empty() {
+		let path = edges.pop_front().unwrap();
 		let last = path.last().unwrap();
 		let cell = cells.get(last).unwrap();
 
-		if cell == end {
-			answers.push(path.clone());
+		if f(cell) {
+			return Some(path);
 		}
-
-		if path.len() > end.ally_distance {
-			continue;
-		}
-
-		for adj in adjacent(cell) {
-			if cells.get(&adj).unwrap().ally_distance > cell.ally_distance {
-				paths.push_back(path.clone().into_iter().chain([adj]).collect());
+	
+		for u in adjacent(cell) {
+			if !visited.contains(&u) {
+				edges.push_back(path.clone().into_iter().chain([u]).collect());
 			}
 		}
+
+		visited.push(*last);
 	}
 
-	answers
+	None
 }
 
 fn flood_fill(cells: &mut HashMap<usize, Cell>, start: &Cell, mut f: impl FnMut(&mut Cell, usize)) {
@@ -191,31 +228,6 @@ fn flood_fill(cells: &mut HashMap<usize, Cell>, start: &Cell, mut f: impl FnMut(
 
 		edges = adding;
 	}
-}
-
-fn bfs(cells: &HashMap<usize, Cell>, start: usize, f: impl Fn(&Cell) -> bool) -> Option<Vec<usize>> {
-	let mut edges: VecDeque<Vec<usize>> = vec![vec![start]].into();
-	let mut visited: Vec<usize> = Vec::new();
-
-	while !edges.is_empty() {
-		let path = edges.pop_front().unwrap();
-		let last = path.last().unwrap();
-		let cell = cells.get(last).unwrap();
-
-		if f(cell) {
-			return Some(path);
-		}
-	
-		for u in adjacent(cell) {
-			if !visited.contains(&u) {
-				edges.push_back(path.clone().into_iter().chain([u]).collect());
-			}
-		}
-
-		visited.push(*last);
-	}
-
-	None
 }
 
 fn parse_turn(cells: &mut HashMap<usize, Cell>, n: usize) {
