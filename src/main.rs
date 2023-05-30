@@ -4,7 +4,7 @@ use std::convert::TryInto;
 // https://www.redblobgames.com/grids/hexagons/
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum CellType {
+enum Resource {
 	None,
 	Egg,
 	Crystal,
@@ -22,7 +22,7 @@ struct Cell {
 	adj: [i32; 6],
 
 	base: Option<Player>,
-	cell_type: CellType,
+	resource: Resource,
 	resources: usize,
 	ally_ants: usize,
 	enemy_ants: usize,
@@ -37,7 +37,7 @@ impl Cell {
 			index: 0,
 			adj: [-1; 6],
 			base: None,
-			cell_type: CellType::None,
+			resource: Resource::None,
 			resources: 0,
 			ally_ants: 0,
 			enemy_ants: 0,
@@ -104,22 +104,42 @@ fn main() {
 				resources.push(cell);
 			}
 		
-			if cell.cell_type == CellType::Crystal {
+			if cell.resource == Resource::Crystal {
 				crystals += cell.resources;
 			}
 
-			if cell.cell_type == CellType::Egg {
+			if cell.resource == Resource::Egg {
 				eggs += cell.resources / (cell.ally_distance + 1);
 			}
 
 			ants += cell.ally_ants;
 		}
 
-		actions.push_str(&format!("MESSAGE {ants} {crystals};"));
+		let mut paths: HashMap<usize, Vec<usize>> = HashMap::new();
 
-		if ants * 10 > crystals {
-			resources.retain(|cell| cell.cell_type == CellType::Crystal);
+		for resource in &resources {
+			let path = bfs(&cells, resource, |cell| cell != *resource && cell.resources > 0).unwrap();
+
+			paths.insert(resource.index, path);
 		}
+
+		for (r, p) in paths {
+			eprintln!("{r:>2}: {p:?}");
+		}
+		
+		let mut remaining = (crystals / ants) as i32;
+
+		actions.push_str(&format!("MESSAGE {remaining};"));
+	
+		resources.retain(|cell| {
+			if cell.resource == Resource::Egg {
+				remaining -= 1;
+
+				remaining > 0
+			} else {
+				true
+			}
+		});
 
 		for hex in resources {
 			actions.push_str(&format!("LINE {base} {hex} 1;"));
@@ -133,7 +153,7 @@ fn calc_score(cells: &HashMap<usize, Cell>, path: &HashSet<usize>, ants: usize, 
 	let richness: usize = path.iter()
 		.map(|hex| cells.get(hex).unwrap())
 		.map(|cell| {
-			let modifier = if cell.cell_type == CellType::Crystal { 1 } else { crystals / ants / 5 };
+			let modifier = if cell.resource == Resource::Crystal { 1 } else { crystals / ants / 5 };
 
 			cell.resources.clamp(0, 1) * modifier
 		})
@@ -144,29 +164,36 @@ fn calc_score(cells: &HashMap<usize, Cell>, path: &HashSet<usize>, ants: usize, 
 	score
 }
 
-fn bfs(cells: &HashMap<usize, Cell>, path: &HashSet<usize>, f: impl Fn(&Cell) -> bool) -> Option<Vec<usize>> {
-	let mut edges: VecDeque<Vec<usize>> = path.iter().map(|hex| vec![*hex]).collect();
-	let mut visited: Vec<usize> = path.clone().into_iter().collect();
+fn bfs(cells: &HashMap<usize, Cell>, start: &Cell, f: impl Fn(&Cell)) -> Vec<usize> {
+	let mut edges: Vec<usize> = vec![start.index];
+	let mut visited: Vec<usize> = edges.clone();
+	let mut answer: Vec<usize> = Vec::new();
 
-	while !edges.is_empty() {
-		let path = edges.pop_front().unwrap();
-		let last = path.last().unwrap();
-		let cell = cells.get(last).unwrap();
+	while !edges.is_empty() && answer.is_empty() {
+		let mut adding = Vec::new();
 
-		if f(cell) {
-			return Some(path);
-		}
-	
-		for u in adjacent(cell) {
-			if !visited.contains(&u) {
-				edges.push_back(path.clone().into_iter().chain([u]).collect());
+		for edge in edges {
+			let cell = cells.get_mut(&edge).unwrap();
+
+			if cell.resources > 0 {
+				answer.push(edge);
 			}
+
+			for u in adjacent(cell) {
+				if cells.get(&u).unwrap().ally_distance > cell.ally_distance {
+					adding.push(u);
+				}
+			}
+
+			visited.push(edge);
 		}
 
-		visited.push(*last);
+		distance += 1;
+
+		edges = adding;
 	}
 
-	None
+	answer
 }
 
 fn flood_fill(cells: &mut HashMap<usize, Cell>, start: &Cell, mut f: impl FnMut(&mut Cell, usize)) {
@@ -215,10 +242,10 @@ fn parse(n: usize) -> HashMap<usize, Cell> {
 		let inputs = input();
 
 		cell.index = i;
-		cell.cell_type = match inputs[0] {
-			0 => CellType::None,
-			1 => CellType::Egg,
-			2 => CellType::Crystal,
+		cell.resource = match inputs[0] {
+			0 => Resource::None,
+			1 => Resource::Egg,
+			2 => Resource::Crystal,
 			_ => panic!(),
 		};
 		cell.resources = inputs[1] as usize;
