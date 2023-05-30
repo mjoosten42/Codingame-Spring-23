@@ -75,7 +75,7 @@ impl Hash for Cell {
 
 impl fmt::Display for Cell {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{:>2}", self.index)
+		write!(f, "{}", self.index)
 	}
 }
 
@@ -115,48 +115,14 @@ fn main() {
 			ants += cell.ally_ants;
 		}
 
-		let mut paths: Vec<HashSet<usize>> = vec![HashSet::from([base.index])];
-		let (mut s, mut j) = (0.0, 0);
-	
-		for i in 0.. {
-			if let Some(path) = bfs(&cells, &paths[i], |cell| {
-				cell.resources > 0 && !paths[i].contains(&cell.index)
-			}) {
-				let last = paths.last().unwrap().clone();
-				let extended: HashSet<usize> = last.into_iter().chain(path.into_iter()).collect();
-				let score = calc_score(&cells, &extended, ants, crystals);
-				
-				// {
-				// 	let mut tmp: Vec<usize> = extended.clone().into_iter().collect();
-				// 	tmp.sort_by(|lhs, rhs| 
-				// 		cells.get(lhs).unwrap().ally_distance.cmp(&cells.get(rhs).unwrap().ally_distance)
-				// 	);
-				
-				// 	eprint!("{score:.2}: ");
-				// 	for hex in tmp {
-				// 		eprint!("{hex:>2} ");
-				// 	}
-				// 	eprintln!("");
-				// }
-			
-				if score > s {
-					s = score;
-					j = i + 1;
-				}
+		actions.push_str(&format!("MESSAGE {ants} {crystals};"));
 
-				paths.push(extended);
-
-			} else {
-				break ;
-			}
+		if ants * 10 > crystals {
+			resources.retain(|cell| cell.cell_type == CellType::Crystal);
 		}
 
-		let best = &paths[j];
-
-		actions.push_str(&format!("MESSAGE {};", best.len()));
-	
-		for hex in best {
-			actions.push_str(&format!("BEACON {hex} 1;"));
+		for hex in resources {
+			actions.push_str(&format!("LINE {base} {hex} 1;"));
 		}
 	
 		println!("{actions}");
