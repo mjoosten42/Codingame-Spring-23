@@ -98,7 +98,7 @@ fn main() {
 		let mut _total_crystals = 0;
 		let mut _total_eggs = 0;
 		let mut total_ants = 0;
-		let mut enemies = 0;
+		let mut _enemies = 0;
 
 		for cell in cells.values() {
 			if cell.ants > 0 {
@@ -126,7 +126,7 @@ fn main() {
 			}
 
 			total_ants += cell.ants;
-			enemies += cell.enemy_ants;
+			_enemies += cell.enemy_ants;
 		}
 
 		let mut claimed: Vec<usize> = bases.clone().into_iter().collect();
@@ -168,24 +168,6 @@ fn main() {
 
 		for base in &bases {
 			print!("BEACON {base} 1;");
-		}
-
-		eprintln!("{total_ants}, {enemies}");
-
-		if total_ants > enemies * 2 {
-			let enemy_bases: Vec<usize> = cells.values()
-				.filter(|cell| cell.base == Some(Player::Enemy))
-				.map(|cell| cell.index)
-				.collect();
-		
-			for base in &enemy_bases {
-				line(&cells, *base, &bases, 10);
-			}
-
-			for base in &bases {
-				print!("BEACON {base} 10;");
-			}
-	
 		}
 
 		println!("WAIT;");
@@ -287,6 +269,8 @@ fn flood_fill(cells: &mut HashMap<usize, Cell>, start: &Vec<usize>, mut f: impl 
 }
 
 fn parse_turn(cells: &mut HashMap<usize, Cell>, n: usize) {
+	let _inputs = input();
+
     for i in 0..n {
         let cell = cells.get_mut(&i).unwrap();
         let inputs = input();
