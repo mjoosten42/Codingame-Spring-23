@@ -27,7 +27,8 @@ struct Cell {
 	ants: usize,
 	enemy_ants: usize,
 
-    ally_distance: usize,
+    distance: usize,
+    enemy_distance: usize,
 }
 
 impl Cell {
@@ -40,7 +41,8 @@ impl Cell {
 			resources: 0,
 			ants: 0,
 			enemy_ants: 0,
-			ally_distance: 0,
+			distance: 0,
+			enemy_distance: 0,
 		}
 	}
 }
@@ -86,10 +88,23 @@ fn main() {
 		.map(|cell| cell.index)
 		.collect();
 
-    flood_fill(&mut cells, &bases, |cell, dist| cell.ally_distance = dist);
+	let enemy_bases: Vec<usize> = cells.values()
+		.filter(|cell| cell.base == Some(Player::Enemy))
+		.map(|cell| cell.index)
+		.collect();
+
+    flood_fill(&mut cells, &bases, |cell, dist| cell.distance = dist);
+    flood_fill(&mut cells, &enemy_bases, |cell, dist| cell.enemy_distance = dist);
+
+	let goal: usize = cells.values()
+		.filter(|cell| cell.resource == Resource::Crystal)
+		.map(|cell| cell.resources)
+		.sum::<usize>() / 2;
+
+	let magic_ratio = f64::powf(cells.len() as f64, 1.0 / 3.0) as usize;
 
 	loop {
-		parse_turn(&mut cells, number_of_cells);
+		let harvested = parse_turn(&mut cells, number_of_cells);
 
 		let mut resources: Vec<&Cell> = Vec::new();
 		let mut crystals: Vec<&Cell> = Vec::new();
@@ -118,7 +133,7 @@ fn main() {
 			}
 
 			if cell.resource == Resource::Crystal {
-				_total_crystals += cell.resources * cell.ally_distance;
+				_total_crystals += cell.resources * cell.distance;
 			}
 
 			if cell.resource == Resource::Egg {
@@ -129,10 +144,26 @@ fn main() {
 			_enemies += cell.enemy_ants;
 		}
 
+		let needed = goal - harvested;
+		let ratio = needed / total_ants;
 		let mut claimed: Vec<usize> = bases.clone().into_iter().collect();
 		let mut budget = total_ants;
 
-		resources.sort_by_key(|cell| cell.ally_distance);
+		resources.sort_by_key(|cell| cell.distance);
+
+		if ratio > magic_ratio && !eggs.is_empty() {
+			resources.retain(|cell| cell.resource == Resource::Egg);
+			print!("MESSAGE Eggs only;")
+		}
+
+		if ratio <= magic_ratio && ratio > 0 {
+			print!("MESSAGE Both;")
+		}
+
+		if ratio == 0 {
+			resources.retain(|cell| cell.resource == Resource::Crystal && cell.distance <= cell.enemy_distance);
+			print!("MESSAGE Crystals only;")
+		}
 
 		// Ensure the ant population is increasing
 		if let Some(egg) = resources.iter().find(|cell| cell.resource == Resource::Egg) {
@@ -207,11 +238,11 @@ fn paths(cells: &HashMap<usize, Cell>, start: &Vec<usize>, f: impl Fn(&Cell) -> 
 	
 		for u in adjacent(cell) {
 			if !visited.contains(&u) {
-				visited.push(u);
-
 				paths.push_back(Some(path.clone().into_iter().chain([u]).collect()));
 			}
 		}
+
+		visited.push(*last);
 	}
 
 	panic!("No paths found!");
@@ -268,8 +299,8 @@ fn flood_fill(cells: &mut HashMap<usize, Cell>, start: &Vec<usize>, mut f: impl 
 	}
 }
 
-fn parse_turn(cells: &mut HashMap<usize, Cell>, n: usize) {
-	let _inputs = input();
+fn parse_turn(cells: &mut HashMap<usize, Cell>, n: usize) -> usize {
+	let harvested = input()[0] as usize;
 
     for i in 0..n {
         let cell = cells.get_mut(&i).unwrap();
@@ -279,6 +310,8 @@ fn parse_turn(cells: &mut HashMap<usize, Cell>, n: usize) {
 		cell.ants = inputs[1] as usize;
 		cell.enemy_ants = inputs[2] as usize;
     }
+
+	harvested
 }
 
 fn parse(n: usize) -> HashMap<usize, Cell> {
