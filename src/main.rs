@@ -24,11 +24,10 @@ struct Cell {
 	base: Option<Player>,
 	resource: Resource,
 	resources: usize,
-	ally_ants: usize,
+	ants: usize,
 	enemy_ants: usize,
 
     ally_distance: usize,
-    enemy_distance: usize,
 }
 
 impl Cell {
@@ -39,10 +38,9 @@ impl Cell {
 			base: None,
 			resource: Resource::None,
 			resources: 0,
-			ally_ants: 0,
+			ants: 0,
 			enemy_ants: 0,
 			ally_distance: 0,
-			enemy_distance: 0,
 		}
 	}
 }
@@ -83,121 +81,186 @@ fn main() {
 	let number_of_cells = input()[0] as usize;
     let mut cells: HashMap<usize, Cell> = parse(number_of_cells);
     
-	let base = *cells.values().find(|cell| cell.base == Some(Player::Ally)).unwrap();
-	let enemy_base = *cells.values().find(|cell| cell.base == Some(Player::Enemy)).unwrap();
+	let bases: Vec<usize> = cells.values()
+		.filter(|cell| cell.base == Some(Player::Ally))
+		.map(|cell| cell.index)
+		.collect();
 
-    flood_fill(&mut cells, &base, |cell, dist| cell.ally_distance = dist);
-    flood_fill(&mut cells, &enemy_base, |cell, dist| cell.enemy_distance = dist);
+    flood_fill(&mut cells, &bases, |cell, dist| cell.ally_distance = dist);
 
 	loop {
-		let mut actions: String = String::from("WAIT;");
-	
 		parse_turn(&mut cells, number_of_cells);
 
 		let mut resources: Vec<&Cell> = Vec::new();
-		let mut crystals = 0;
-		let mut ants = 0;
-		let mut eggs = 0;
+		let mut crystals: Vec<&Cell> = Vec::new();
+		let mut eggs: Vec<&Cell> = Vec::new();
+		let mut ants: Vec<&Cell> = Vec::new();
+		let mut _total_crystals = 0;
+		let mut _total_eggs = 0;
+		let mut total_ants = 0;
+		let mut enemies = 0;
 
 		for cell in cells.values() {
+			if cell.ants > 0 {
+				ants.push(cell);
+			}
+		
 			if cell.resources > 0 {
 				resources.push(cell);
-			}
-		
-			if cell.resource == Resource::Crystal {
-				crystals += cell.resources;
-			}
+			
+				if cell.resource == Resource::Crystal {
+					crystals.push(cell);
+				}
 
-			if cell.resource == Resource::Egg {
-				eggs += cell.resources / (cell.ally_distance + 1);
-			}
-
-			ants += cell.ally_ants;
-		}
-
-		let mut paths: HashMap<usize, Vec<usize>> = HashMap::new();
-
-		for resource in &resources {
-			let path = bfs(&cells, resource, |cell| cell != *resource && cell.resources > 0).unwrap();
-
-			paths.insert(resource.index, path);
-		}
-
-		for (r, p) in paths {
-			eprintln!("{r:>2}: {p:?}");
-		}
-		
-		let mut remaining = (crystals / ants) as i32;
-
-		actions.push_str(&format!("MESSAGE {remaining};"));
-	
-		resources.retain(|cell| {
-			if cell.resource == Resource::Egg {
-				remaining -= 1;
-
-				remaining > 0
-			} else {
-				true
-			}
-		});
-
-		for hex in resources {
-			actions.push_str(&format!("LINE {base} {hex} 1;"));
-		}
-	
-		println!("{actions}");
-	}
-}
-
-fn calc_score(cells: &HashMap<usize, Cell>, path: &HashSet<usize>, ants: usize, crystals: usize) -> f32 {
-	let richness: usize = path.iter()
-		.map(|hex| cells.get(hex).unwrap())
-		.map(|cell| {
-			let modifier = if cell.resource == Resource::Crystal { 1 } else { crystals / ants / 5 };
-
-			cell.resources.clamp(0, 1) * modifier
-		})
-		.sum();
-
-	let score = ants as f32 * richness as f32 / path.len() as f32;
-
-	score
-}
-
-fn bfs(cells: &HashMap<usize, Cell>, start: &Cell, f: impl Fn(&Cell)) -> Vec<usize> {
-	let mut edges: Vec<usize> = vec![start.index];
-	let mut visited: Vec<usize> = edges.clone();
-	let mut answer: Vec<usize> = Vec::new();
-
-	while !edges.is_empty() && answer.is_empty() {
-		let mut adding = Vec::new();
-
-		for edge in edges {
-			let cell = cells.get_mut(&edge).unwrap();
-
-			if cell.resources > 0 {
-				answer.push(edge);
-			}
-
-			for u in adjacent(cell) {
-				if cells.get(&u).unwrap().ally_distance > cell.ally_distance {
-					adding.push(u);
+				if cell.resource == Resource::Egg {
+					eggs.push(cell);
 				}
 			}
 
-			visited.push(edge);
+			if cell.resource == Resource::Crystal {
+				_total_crystals += cell.resources * cell.ally_distance;
+			}
+
+			if cell.resource == Resource::Egg {
+				_total_eggs += cell.resources;
+			}
+
+			total_ants += cell.ants;
+			enemies += cell.enemy_ants;
 		}
 
-		distance += 1;
+		let mut claimed: Vec<usize> = bases.clone().into_iter().collect();
+		let mut budget = total_ants;
 
-		edges = adding;
+		resources.sort_by_key(|cell| cell.ally_distance);
+
+		// Ensure the ant population is increasing
+		if let Some(egg) = resources.iter().find(|cell| cell.resource == Resource::Egg) {
+			let paths = paths(&cells, &bases, |cell| claimed.contains(&cell.index));
+
+			line(&cells, egg.index, &claimed, 1);
+			
+			if paths.len() == 1 {
+				claimed.extend(paths[0].iter());
+			}
+
+			claimed.push(egg.index);
+
+			budget -= paths[0].len();
+		}
+
+		for resource in resources {
+			let paths = paths(&cells, &vec![resource.index], |cell| claimed.contains(&cell.index));
+			let distance = paths[0].len();
+
+			if budget > distance {
+				budget -= distance;
+
+				line(&cells, resource.index, &claimed, 1);
+			
+				if paths.len() == 1 {
+					claimed.extend(paths[0].iter());
+				}
+	
+				claimed.push(resource.index);
+			}
+		}
+
+		for base in &bases {
+			print!("BEACON {base} 1;");
+		}
+
+		eprintln!("{total_ants}, {enemies}");
+
+		if total_ants > enemies * 2 {
+			let enemy_bases: Vec<usize> = cells.values()
+				.filter(|cell| cell.base == Some(Player::Enemy))
+				.map(|cell| cell.index)
+				.collect();
+		
+			for base in &enemy_bases {
+				line(&cells, *base, &bases, 10);
+			}
+
+			for base in &bases {
+				print!("BEACON {base} 10;");
+			}
+	
+		}
+
+		println!("WAIT;");
 	}
-
-	answer
 }
 
-fn flood_fill(cells: &mut HashMap<usize, Cell>, start: &Cell, mut f: impl FnMut(&mut Cell, usize)) {
-	let mut edges: Vec<usize> = vec![start.index];
+fn line(cells: &HashMap<usize, Cell>, target: usize, from: &Vec<usize>, strength: usize) {
+	let closest = bfs(&cells, &vec![target], |cell| from.contains(&cell.index));
+
+	print!("LINE {closest} {target} {strength};");
+}
+
+fn paths(cells: &HashMap<usize, Cell>, start: &Vec<usize>, f: impl Fn(&Cell) -> bool) -> Vec<Vec<usize>> {
+	let mut paths: VecDeque<Option<Vec<usize>>> = vec![Some(start.clone()), None].into();
+	let mut answer: Vec<Vec<usize>> = Vec::new();
+	let mut visited: Vec<usize> = start.clone();
+
+	while !paths.is_empty() {
+		let opt = paths.pop_front().unwrap();
+
+		if opt.is_none() {
+			if !answer.is_empty() {
+				return answer;
+			}
+		
+			paths.push_back(None);
+			continue;
+		}
+
+		let path = opt.unwrap();
+		let last = path.last().unwrap();
+		let cell = cells.get(&last).unwrap();
+
+		if f(cell) {
+			answer.push(path.clone());
+		}
+	
+		for u in adjacent(cell) {
+			if !visited.contains(&u) {
+				visited.push(u);
+
+				paths.push_back(Some(path.clone().into_iter().chain([u]).collect()));
+			}
+		}
+	}
+
+	panic!("No paths found!");
+}
+
+fn bfs(cells: &HashMap<usize, Cell>, start: &Vec<usize>, f: impl Fn(&Cell) -> bool) -> usize {
+	let mut edges: VecDeque<usize> = start.clone().into();
+	let mut visited: HashSet<usize> = HashSet::new();
+
+	while !edges.is_empty() {
+		let edge = edges.pop_front().unwrap();
+		let cell = cells.get(&edge).unwrap();
+
+		if f(cell) {
+			return edge;
+		}
+
+		for adj in adjacent(cell) {
+			if !visited.contains(&adj) {
+				edges.push_back(adj);
+			}
+		}
+
+		visited.insert(edge);
+	}
+
+	panic!("No cell found!");
+}
+
+fn flood_fill(cells: &mut HashMap<usize, Cell>, start: &Vec<usize>, mut f: impl FnMut(&mut Cell, usize)) {
+	let mut edges: Vec<usize> = start.clone();
 	let mut visited: Vec<usize> = edges.clone();
 	let mut distance = 0;
 
@@ -229,7 +292,7 @@ fn parse_turn(cells: &mut HashMap<usize, Cell>, n: usize) {
         let inputs = input();
 
 		cell.resources = inputs[0] as usize;
-		cell.ally_ants = inputs[1] as usize;
+		cell.ants = inputs[1] as usize;
 		cell.enemy_ants = inputs[2] as usize;
     }
 }
@@ -268,15 +331,10 @@ fn parse(n: usize) -> HashMap<usize, Cell> {
 }
 
 fn adjacent(cell: &Cell) -> Vec<usize> {
-	let mut adj = Vec::new();
-
-	for a in cell.adj {
-		if a != -1 {
-			adj.push(a as usize);
-		}
-	}
-
-	adj
+	cell.adj.iter()
+		.filter(|a| **a != -1)
+		.map(|a| *a as usize)
+		.collect()
 }
 
 fn input() -> Vec<i32> {
