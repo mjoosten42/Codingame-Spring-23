@@ -165,32 +165,21 @@ fn main() {
 			print!("MESSAGE Crystals only;")
 		}
 
-		// Ensure the ant population is increasing
-		if let Some(egg) = resources.iter().find(|cell| cell.resource == Resource::Egg) {
-			let paths = paths(&cells, &bases, |cell| claimed.contains(&cell.index));
-
-			line(&cells, egg.index, &claimed, 1);
-			
-			if paths.len() == 1 {
-				claimed.extend(paths[0].iter());
-			}
-
-			claimed.push(egg.index);
-
-			budget -= paths[0].len();
-		}
-
 		for resource in resources {
 			let paths = paths(&cells, &vec![resource.index], |cell| claimed.contains(&cell.index));
-			let distance = paths[0].len();
+			let path = &paths[0];
+			let distance = path.len();
 
 			if budget > distance {
 				budget -= distance;
 
-				line(&cells, resource.index, &claimed, 1);
+				let from = *path.last().unwrap();
+				let strength = 1;
+
+				print!("LINE {from} {resource} {strength};");
 			
 				if paths.len() == 1 {
-					claimed.extend(paths[0].iter());
+					claimed.extend(path.iter());
 				}
 	
 				claimed.push(resource.index);
@@ -203,12 +192,6 @@ fn main() {
 
 		println!("WAIT;");
 	}
-}
-
-fn line(cells: &HashMap<usize, Cell>, target: usize, from: &Vec<usize>, strength: usize) {
-	let closest = bfs(&cells, &vec![target], |cell| from.contains(&cell.index));
-
-	print!("LINE {closest} {target} {strength};");
 }
 
 fn paths(cells: &HashMap<usize, Cell>, start: &Vec<usize>, f: impl Fn(&Cell) -> bool) -> Vec<Vec<usize>> {
